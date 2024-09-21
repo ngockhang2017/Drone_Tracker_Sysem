@@ -13,6 +13,14 @@
 #include<QStackedLayout>
 #include<manual_control.h>
 
+#include <algorithm>
+#include <cmath>
+#include<QTimer>
+#include <QDateTime>
+#include <QFont>
+#include <QColor>
+#include<QEventLoop>
+
 QT_BEGIN_NAMESPACE
 namespace Ui { class MainWindow; }
 QT_END_NAMESPACE
@@ -28,6 +36,10 @@ public:
 protected:
     void paintEvent(QPaintEvent *event) override;
     void resizeEvent(QResizeEvent *event) override;
+
+protected:
+    void keyPressEvent(QKeyEvent *event) override;
+    void keyReleaseEvent(QKeyEvent *event) override;
 
 private slots:
     void processPendingImageDatagrams();
@@ -59,19 +71,33 @@ private slots:
 
     void on_actionStop_Auto_tracking_triggered();
 
+    void updateBlinking();
+
 public:
     void sendPanTiltCommand(bool panRight, float panSpeed, bool tiltDown, float tiltSpeed);
     void sendPelcoDCommand(QByteArray frame);
 
     void onSerialDataReceived();
-    void requestPTZPositions();
+
     QByteArray createPelcoCommand(quint8 command);
     quint8 calculateChecksum(const QByteArray &packet);
     void drawPanGauge(QPainter &painter, int panAngle);
     void drawTiltGauge(QPainter &painter, int tiltAngle);
+    void ObjectTracking(const QRect &bbox);
     void drawObjectInCenter(QPainter &painter);
+
+    void Absolute_Pan_Position(double pan_angle);
+    void Absolute_Tilt_Position(double tilt_angle);
+    void requestPosition(QSerialPort *serialPort, bool isPan);
+    void updatePosition(QByteArray response, double &panCurrent, double &tiltCurrent);
+
 protected slots:
     void timerEvent(QTimerEvent *event) override;
+
+signals:
+    void PanPosition_Updated_signal();
+     void TiltPosition_Updated_signal();
+
 private:
     QByteArray frameControl;
     Ui::MainWindow *ui;
@@ -83,11 +109,14 @@ private:
     QRect currentBoundingBox;
     QSerialPort *ptzSerialPort;
 
-    float currentPan, currentTilt, currentZoom;
+    double currentPanAngle, currentTiltAngle;
     Manual_Control *m_Manual_Control;
     bool Auto_tracking = false;
 
+    bool isBlinkingVisible = false;
+    QTimer *blinkTimer;
 
+    int count = 0;
 };
 
 #endif // MAINWINDOW_H
