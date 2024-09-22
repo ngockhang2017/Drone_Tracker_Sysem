@@ -18,6 +18,7 @@
 #include <QDebug>
 #include <algorithm>
 #include <cmath>
+#include<QThread>
 using namespace std;
 
 MainWindow::MainWindow(QWidget *parent)
@@ -62,7 +63,10 @@ MainWindow::MainWindow(QWidget *parent)
     }
 
     connect(ptzSerialPort, &QSerialPort::readyRead, this, &MainWindow::onSerialDataReceived);
-    requestPosition(this->ptzSerialPort, true); //cập nhật pan hiện tại là bao nhiêu độ
+    //    requestPosition(this->ptzSerialPort, true);
+
+    //    requestPosition(this->ptzSerialPort, false);
+    //    qDebug() << "AT THE FIRST TIME, TILT ANGAL IS: " << this->currentTiltAngle;
 
     m_Manual_Control = new Manual_Control();
     connect(m_Manual_Control, SIGNAL(UpSignal()), this, SLOT(UpSlot()));
@@ -318,7 +322,10 @@ void MainWindow::timerEvent(QTimerEvent *event)
 {
     if(this->Auto_tracking)
     {
-        ObjectTracking(this->currentBoundingBox);
+        if(deltaX >= deltaY && this->deltaX >0)
+            ObjectTracking(this->currentBoundingBox, true);
+        if(deltaY > deltaX && deltaY >0)
+            ObjectTracking(this->currentBoundingBox, false);
     }
 }
 
@@ -349,9 +356,6 @@ void MainWindow::requestPosition(QSerialPort *serialPort, bool isPan) {
 }
 
 void MainWindow::updatePosition(QByteArray response, double &panCurrent, double &tiltCurrent) {
-    //    qDebug() << "Response.mid(3, 1): " << response.mid(3, 1).toHex();
-
-    // Giải mã giá trị Pan
     if (response.mid(3, 1).toHex() == "59")  // Mã lệnh trả về Pan Position
     {
         QByteArray data = response.mid(4, 2); // Lấy PMSB và PLSB
@@ -360,10 +364,8 @@ void MainWindow::updatePosition(QByteArray response, double &panCurrent, double 
         uint16_t Pdata = (PMSB * 256) + PLSB;
         panCurrent = static_cast<double>(Pdata) / 100.0;
         emit PanPosition_Updated_signal();
-        qDebug() << "--------> PanPosition_Updated_signal";
     }
 
-    // Giải mã giá trị Tilt
     else if (response.mid(3, 1).toHex() == "5b")  // Mã lệnh trả về Tilt Position
     {
         QByteArray data = response.mid(4, 2); // Lấy TMSB và TLSB
@@ -371,7 +373,6 @@ void MainWindow::updatePosition(QByteArray response, double &panCurrent, double 
         uint16_t TLSB = data[1] & 0xFF;
         uint16_t Tdata = (TMSB * 256) + TLSB;
 
-        // Xử lý giá trị tilt dựa trên các quy tắc đã cung cấp
         int16_t tiltValue;
         if (Tdata >= 32768) {
             tiltValue = 32768 - Tdata;  // Điều chỉnh nếu Tdata nằm trong khoảng giá trị âm
@@ -379,8 +380,8 @@ void MainWindow::updatePosition(QByteArray response, double &panCurrent, double 
             tiltValue = Tdata;  // Giá trị tilt nằm trong khoảng giá trị dương
         }
 
-        // Chuyển đổi tiltValue thành độ tilt hiện tại
         tiltCurrent = static_cast<double>(tiltValue) / 100.0;
+        emit TiltPosition_Updated_signal();
     }
 
     // Trường hợp không rõ mã lệnh
@@ -395,55 +396,74 @@ void MainWindow::onSerialDataReceived()
     QByteArray response = ptzSerialPort->readAll();
     updatePosition(response, this->currentPanAngle, this->currentTiltAngle);
 }
-void MainWindow::ObjectTracking(const QRect &bbox)
+void MainWindow::ObjectTracking(const QRect &bbox, bool isPan)
 {
     qDebug()<<"*******************************************************************";
-    QEventLoop loop;
-    connect(this, &MainWindow::PanPosition_Updated_signal, &loop, &QEventLoop::quit);
-     requestPosition(this->ptzSerialPort, true); //cập nhật pan hiện tại là bao nhiêu độ
+    //    qDebug() << "Aspect RATIO: (" << currentImage.width()<<", " << currentImage.height()<<")";
 
-    loop.exec();
-    requestPosition(this->ptzSerialPort, true); //cập nhật pan hiện tại là bao nhiêu độ
-    qDebug()<<"* CURRENT Pan: " <<this->currentPanAngle;
+    if(isPan) // adjust pan
+    {
+        QEventLoop loop_pan;
+        connect(this, &MainWindow::PanPosition_Updated_signal, &loop_pan, &QEventLoop::quit);
+        requestPosition(this->ptzSerialPort, true);
+        loop_pan.exec();
 
-    int frameCenterX = currentImage.width() / 2;
+        qDebug()<<"* CURRENT Pan: " <<this->currentPanAngle;
 
-    int bboxCenterX = bbox.x() + bbox.width() / 2;
+        int frameCenterX = currentImage.width() / 2;
+        int bboxCenterX = bbox.x() + bbox.width() / 2;
 
-    qDebug()<<"Center_X: "<< frameCenterX;
-    qDebug()<<"bbox_X: "<< bboxCenterX;
+        qDebug()<<"Center_X: "<< frameCenterX;
+        qDebug()<<"bbox_X: "<< bboxCenterX;
 
-    int deltaX = bboxCenterX - frameCenterX;
-    qDebug()<<"deltaX = " << deltaX;// << "; deltaY = " << deltaY;
+        this->deltaX = bboxCenterX - frameCenterX;
+        qDebug()<<"deltaX = " << deltaX;
 
-    double panAdjustment = (static_cast<double>(deltaX) / currentImage.width()) * 58.7;  // Pan có phạm vi từ 2.0° đến 58.7°
-    qDebug()<< "panAdjustment = "<<panAdjustment; //<<", tiltAdjustment = "<<tiltAdjustment;
+        double panAdjustment = (static_cast<double>(deltaX) / currentImage.width()) * 58.7;  // Pan có phạm vi từ 2.0° đến 58.7°
+        qDebug() << "panAdjustment = "<<panAdjustment;
 
+        this->currentPanAngle += panAdjustment;
 
-    //    qDebug()<<"* Tilt: " << this->currentTiltAngle;
+        if (currentPanAngle >= 360.0) {
+            currentPanAngle = currentPanAngle - 360.0;
+        } else if (currentPanAngle < 0.0) {
+            currentPanAngle += 360.0;
+        }
 
-    this->currentPanAngle += panAdjustment;
-    //    this->new_currentTiltAngle += tiltAdjustment;
-
-
-    //    if(deltaY > 10) new_currentTiltAngle+=10.0;
-    //    if(deltaY < 0 && -1*deltaY > 10) new_currentTiltAngle-=10.0;
-
-    if (currentPanAngle >= 360.0) {
-        currentPanAngle = currentPanAngle - 360.0;
-    } else if (currentPanAngle < 0.0) {
-        currentPanAngle += 360.0;
+        Absolute_Pan_Position(currentPanAngle);
+        this->deltaX = -1;
     }
+    else // adjust tilt
+    {
+        QEventLoop loop_tilt;
+        connect(this, &MainWindow::TiltPosition_Updated_signal, &loop_tilt, &QEventLoop::quit);
+        requestPosition(this->ptzSerialPort, false);
+        loop_tilt.exec();
 
-    /*     if (new_currentTiltAngle > 40.0) {
-            new_currentTiltAngle = 40.0;
-        } else if (new_currentTiltAngle < -90.0) {
-            new_currentTiltAngle = -90.0;
-        }*/
+        qDebug()<<"* CURRENT Tilt: " <<this->currentTiltAngle;
 
-    Absolute_Pan_Position(currentPanAngle);
+        int frameCenterY = currentImage.height() / 2;
+        int bboxCenterY = bbox.y() + bbox.height() / 2;
 
+        qDebug()<<"Center_Y: "<< frameCenterY;
+        qDebug()<<"bbox_Y: "<< bboxCenterY;
+
+        this->deltaY = bboxCenterY - frameCenterY;
+        qDebug()<<"deltaY = " << deltaY ;
+
+        double tiltAdjustment = (static_cast<double>(deltaY) / currentImage.height()) * 35.136;  // Tilt có phạm vi dự đoán là 35.136° ở mức zoom 1
+        qDebug() << ", tiltAdjustment = "<<tiltAdjustment;
+
+        this->currentTiltAngle -= tiltAdjustment;
+
+        if (currentTiltAngle > 40.0) currentTiltAngle = 40.0;
+        else if (currentTiltAngle < -90.0) currentTiltAngle = -90.0;
+
+        Absolute_Tilt_Position(currentTiltAngle);
+        this->deltaY = -1;
+    }
     qDebug()<<"* NEW Pan: " <<this->currentPanAngle;
+    qDebug()<<"* NEW Tilt: " <<this->currentTiltAngle;
 }
 
 void MainWindow::Absolute_Pan_Position(double pan_angle)

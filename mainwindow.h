@@ -83,7 +83,7 @@ public:
     quint8 calculateChecksum(const QByteArray &packet);
     void drawPanGauge(QPainter &painter, int panAngle);
     void drawTiltGauge(QPainter &painter, int tiltAngle);
-    void ObjectTracking(const QRect &bbox);
+    void ObjectTracking(const QRect &bbox, bool isPan);
     void drawObjectInCenter(QPainter &painter);
 
     void Absolute_Pan_Position(double pan_angle);
@@ -98,6 +98,8 @@ signals:
     void PanPosition_Updated_signal();
      void TiltPosition_Updated_signal();
 
+     void Tilt_Adjust_finised();
+
 private:
     QByteArray frameControl;
     Ui::MainWindow *ui;
@@ -109,7 +111,7 @@ private:
     QRect currentBoundingBox;
     QSerialPort *ptzSerialPort;
 
-    double currentPanAngle, currentTiltAngle;
+    double currentPanAngle, currentTiltAngle, expected_Pan;
     Manual_Control *m_Manual_Control;
     bool Auto_tracking = false;
 
@@ -117,6 +119,9 @@ private:
     QTimer *blinkTimer;
 
     int count = 0;
+    bool pan_adjust_finised =false;
+
+    int deltaX = 0, deltaY = 0;
 };
 
 #endif // MAINWINDOW_H
