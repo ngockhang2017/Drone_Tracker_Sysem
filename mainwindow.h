@@ -21,6 +21,28 @@
 #include <QColor>
 #include<QEventLoop>
 
+#include <QPainter>
+#include <QDebug>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QJsonArray>
+#include <QPixmap>
+#include <QResizeEvent>
+#include <QSerialPort>
+#include <QSerialPortInfo>
+#include<cmath>
+#include <QtMath>
+#include <iostream>
+#include <limits>
+#include <QRect>
+#include <QPoint>
+#include <QDebug>
+#include <algorithm>
+#include <cmath>
+#include<QThread>
+#include <QtMath>
+
+
 QT_BEGIN_NAMESPACE
 namespace Ui { class MainWindow; }
 QT_END_NAMESPACE
@@ -82,7 +104,7 @@ public:
     QByteArray createPelcoCommand(quint8 command);
     quint8 calculateChecksum(const QByteArray &packet);
     void drawPanGauge(QPainter &painter, int panAngle);
-    void drawTiltGauge(QPainter &painter, int tiltAngle);
+    void drawTiltGauge(QPainter &painter, double tiltAngle);
     void ObjectTracking(const QRect &bbox, bool isPan);
     void drawObjectInCenter(QPainter &painter);
 
@@ -91,14 +113,17 @@ public:
     void requestPosition(QSerialPort *serialPort, bool isPan);
     void updatePosition(QByteArray response, double &panCurrent, double &tiltCurrent);
 
+    void UpdatePanTiltStatus();
+    void Paint_Pan_Status(QPainter &painter, double Pan_Angle);
+
 protected slots:
     void timerEvent(QTimerEvent *event) override;
 
 signals:
     void PanPosition_Updated_signal();
-     void TiltPosition_Updated_signal();
+    void TiltPosition_Updated_signal();
 
-     void Tilt_Adjust_finised();
+    void Tilt_Adjust_finised();
 
 private:
     QByteArray frameControl;
@@ -111,17 +136,19 @@ private:
     QRect currentBoundingBox;
     QSerialPort *ptzSerialPort;
 
-    double currentPanAngle, currentTiltAngle, expected_Pan;
+    double currentPanAngle = -1.0, currentTiltAngle = -1.0;
     Manual_Control *m_Manual_Control;
     bool Auto_tracking = false;
 
     bool isBlinkingVisible = false;
-    QTimer *blinkTimer;
+    QTimer *blinkTimer, *update_pan_tilt_timer;
 
-    int count = 0;
+    int count = 0, count1 = 0;
     bool pan_adjust_finised =false;
 
     int deltaX = 0, deltaY = 0;
+    double Pan_Expectaion = -1.0 , Tilt_Expectation = -1.0;
+    bool Object_Detected = false;
 };
 
 #endif // MAINWINDOW_H
