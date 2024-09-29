@@ -41,6 +41,17 @@
 #include <cmath>
 #include<QThread>
 #include <QtMath>
+#include <QPainter>
+#include <QWidget>
+// Giả định rằng bạn có một lớp MainWindow kế thừa từ QWidget
+#include <QPainter>
+#include <QWidget>
+#include <QPainter>
+#include <QWidget>
+#include<QDesktopServices>
+#include<QNetworkAccessManager>
+#include <QNetworkReply>
+typedef  QVector<double> DOASample;
 
 
 QT_BEGIN_NAMESPACE
@@ -66,9 +77,6 @@ protected:
 private slots:
     void processPendingImageDatagrams();
     void processPendingBboxDatagrams();
-
-    void trackObjectWithPTZ(const QRect &bbox, int zoomLevel);
-
     void on_actionControl_Manual_triggered();
 
     void UpSlot();
@@ -113,11 +121,17 @@ public:
     void requestPosition(QSerialPort *serialPort, bool isPan);
     void updatePosition(QByteArray response, double &panCurrent, double &tiltCurrent);
 
+    void CheckDOA();
+    void CheckTiltStep();
     void UpdatePanTiltStatus();
     void Paint_Pan_Status(QPainter &painter, double Pan_Angle);
 
 protected slots:
     void timerEvent(QTimerEvent *event) override;
+
+public slots:
+    void networkReplyKraken(QNetworkReply *reply);
+    void Request();
 
 signals:
     void PanPosition_Updated_signal();
@@ -141,7 +155,7 @@ private:
     bool Auto_tracking = false;
 
     bool isBlinkingVisible = false;
-    QTimer *blinkTimer, *update_pan_tilt_timer;
+    QTimer *timer_request, *blinkTimer, *update_doa, *update_pantilt, *tilt_check_by_step_timer;
 
     int count = 0, count1 = 0;
     bool pan_adjust_finised =false;
@@ -149,6 +163,13 @@ private:
     int deltaX = 0, deltaY = 0;
     double Pan_Expectaion = -1.0 , Tilt_Expectation = -1.0;
     bool Object_Detected = false;
+    int current_doa_check = 0.0;
+    double tilt_check_by_step = 40.0;
+
+    QNetworkAccessManager *manager;
+    QVector<DOASample> allSample;
+    bool stop_check_pan = false;
+
 };
 
 #endif // MAINWINDOW_H

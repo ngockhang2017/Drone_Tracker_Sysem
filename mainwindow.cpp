@@ -12,6 +12,7 @@ MainWindow::MainWindow(QWidget *parent)
     , ptzSerialPort(new QSerialPort(this))
 {
     ui->setupUi(this);
+
     //    this->showFullScreen();
 
     // Bind UDP socket for image
@@ -28,7 +29,7 @@ MainWindow::MainWindow(QWidget *parent)
     setCentralWidget(imageLabel);
 
     // Setup PTZ Serial Port
-    ptzSerialPort->setPortName("COM3");
+    ptzSerialPort->setPortName("COM4");
     ptzSerialPort->setBaudRate(QSerialPort::Baud9600);
     ptzSerialPort->setDataBits(QSerialPort::Data8);
     ptzSerialPort->setParity(QSerialPort::NoParity);
@@ -57,25 +58,64 @@ MainWindow::MainWindow(QWidget *parent)
     connect(m_Manual_Control, SIGNAL(ZoomOutSignal()), this, SLOT(ZoomOutSlot()));
     connect(m_Manual_Control, SIGNAL(StopSignal()), this, SLOT(StopSlot()));
 
-    startTimer(2000);
+    startTimer(1000);
 
-    //Tạo timer cho cập nhật delta x, y
-//    update_pan_tilt_timer = new QTimer(this);
-//    connect(update_pan_tilt_timer, &QTimer::timeout, this, &MainWindow::UpdatePanTiltStatus);
-//    update_pan_tilt_timer->start(1500);
+    //Tạo timer cho cập nhật doa
+    //    update_pantilt = new QTimer(this);
+    //    connect(update_pantilt, &QTimer::timeout, this, &MainWindow::UpdatePanTiltStatus);
+    //    update_pantilt->start(3000);
 
     // Tạo Timer cho hiệu ứng nhấp nháy
     blinkTimer = new QTimer(this);
     connect(blinkTimer, &QTimer::timeout, this, &MainWindow::updateBlinking);
     blinkTimer->start(500); // 500 ms cho chu kỳ nhấp nháy
+
+    //Timer kiểm tra góc tín hiệu tới (check PAN)
+    update_doa = new QTimer(this);
+    connect(update_doa, &QTimer::timeout, this, &MainWindow::CheckDOA);
+    //    update_doa->start(3000);
+
+    // Timer kiểm tra góc tín hiệu tới (check TILT)
+    tilt_check_by_step_timer = new QTimer(this);
+    connect(tilt_check_by_step_timer, &QTimer::timeout, this, &MainWindow::CheckTiltStep);
+    //    tilt_check_by_step_timer->start(1000);
+
+    this->manager = new QNetworkAccessManager();
+    QObject::connect(manager, SIGNAL(finished(QNetworkReply*)),this, SLOT(networkReplyKraken(QNetworkReply*)));
+
+    //DOA Timer
+    this->timer_request = new QTimer(this);
+    connect(timer_request, SIGNAL(timeout()), this, SLOT(Request()));
+    //    timer_request->start(500);
 }
 
+void MainWindow::Request()  //timer for request to server
+{
+    QNetworkRequest request(QUrl("http://192.168.100.10:8081/DOA_value.html"));
+    manager->get(request);
+}
+void MainWindow::networkReplyKraken(QNetworkReply *reply)
+{
+    QByteArray data = reply->readAll();
+    if(!data.isEmpty())
+    {
+        QString GetDataString = QString(data);
+        DOASample datarow1;
+        QStringList cols = GetDataString.split(",");
+
+        double MaxValue =  0.1;
+        double value = 0.0;
+
+        current_doa_check = 360.0 - cols.at(1).toDouble();
+
+        qDebug() << "current_doa_check = " << current_doa_check;
+    }
+}
 MainWindow::~MainWindow()
 {
     ptzSerialPort->close();
     delete ui;
 }
-
 void MainWindow::processPendingImageDatagrams()
 {
     while (imageSocket->hasPendingDatagrams()) {
@@ -108,7 +148,6 @@ void MainWindow::processPendingImageDatagrams()
         }
     }
 }
-
 void MainWindow::processPendingBboxDatagrams()
 {
     while (bboxSocket->hasPendingDatagrams())
@@ -129,17 +168,20 @@ void MainWindow::processPendingBboxDatagrams()
         QJsonObject jsonObj = jsonDoc.object();
         QJsonArray bboxes = jsonObj["bboxes"].toArray();
 
-//        qDebug() << "bboxes size: " << bboxes.size();
+        //        qDebug() << "bboxes size: " << bboxes.size();
         if(bboxes.size() == 0)
         {
             //không detect được hoặc chưa detect được
-//            Pan_Expectaion = currentPanAngle;
-//            Tilt_Expectation = currentTiltAngle;
+            //            Pan_Expectaion = currentPanAngle;
+            //            Tilt_Expectation = currentTiltAngle;
             this->Object_Detected = false;
         }
         else
         {
             this->Object_Detected = true;
+            this->Auto_tracking = true;
+            this->stop_check_pan = true;
+
             // QRect maxAccuracyBBox;
             float maxAccuracy = 0.0;
             for (const QJsonValue &value : bboxes)
@@ -158,185 +200,51 @@ void MainWindow::processPendingBboxDatagrams()
                     maxAccuracy = accuracy;
                     this->currentBoundingBox = bbox;
 
-//                    if(std::abs(currentPanAngle - Pan_Expectaion) <= 0.1)
-//                    {
-//                        this->deltaX = (currentBoundingBox.x() + currentBoundingBox.width()/2) - currentImage.width()/2;
-//                        qDebug() << "Cap nhat delta X!";
-//                    }
-//                    if(std::abs(currentTiltAngle - Tilt_Expectation) <= 0.1)
-//                    {
-//                        this->deltaY = (currentBoundingBox.y() + currentBoundingBox.height()/2) - currentImage.height()/2;
-//                        qDebug() << "Cap nhat delta Y!";
-//                    }
+                    //                    if(std::abs(currentPanAngle - Pan_Expectaion) <= 0.1)
+                    //                    {
+                    //                        this->deltaX = (currentBoundingBox.x() + currentBoundingBox.width()/2) - currentImage.width()/2;
+                    //                        qDebug() << "Cap nhat delta X!";
+                    //                    }
+                    //                    if(std::abs(currentTiltAngle - Tilt_Expectation) <= 0.1)
+                    //                    {
+                    //                        this->deltaY = (currentBoundingBox.y() + currentBoundingBox.height()/2) - currentImage.height()/2;
+                    //                        qDebug() << "Cap nhat delta Y!";
+                    //                    }
                 }
             }
         }
     }
 }
-
+void MainWindow::CheckDOA()
+{
+    //    if(this->Object_Detected == false && stop_check_pan == false)
+    //    {
+    //        Absolute_Pan_Position(double(this->current_doa_check));
+    //    }
+}
+void MainWindow::CheckTiltStep()
+{
+    //    if(this->Object_Detected == false)
+    //    {
+    //        Absolute_Tilt_Position(this->tilt_check_by_step);
+    //        tilt_check_by_step += -20.0;
+    //        if(tilt_check_by_step == -40.0)
+    //            tilt_check_by_step = 40.0;
+    //    }
+}
 void MainWindow::UpdatePanTiltStatus()
 {
-//    QEventLoop loop_pan;
-//    connect(this, &MainWindow::PanPosition_Updated_signal, &loop_pan, &QEventLoop::quit);
-//    requestPosition(this->ptzSerialPort, true);
-//    loop_pan.exec();
+    QEventLoop loop_pan;
+    connect(this, &MainWindow::PanPosition_Updated_signal, &loop_pan, &QEventLoop::quit);
+    requestPosition(this->ptzSerialPort, true);
+    loop_pan.exec();
 
-//    QEventLoop loop_tilt;
-//    connect(this, &MainWindow::TiltPosition_Updated_signal, &loop_tilt, &QEventLoop::quit);
-//    requestPosition(this->ptzSerialPort, false);
-//    loop_tilt.exec();
-
-//    qDebug() << "Update_PAN TILT() lan thu: " << count;
-//    count++;
+    QEventLoop loop_tilt;
+    connect(this, &MainWindow::TiltPosition_Updated_signal, &loop_tilt, &QEventLoop::quit);
+    requestPosition(this->ptzSerialPort, false);
+    loop_tilt.exec();
 }
-
-//old
-float sigmoid(float x) {
-    return 63.0f / (1.0f + std::exp(-x));
-}
-void MainWindow::trackObjectWithPTZ(const QRect &bbox, int zoomLevel) {
-
-    QPoint center = bbox.center();
-
-    int frameCenterX = currentImage.width() / 2;
-    int frameCenterY = currentImage.height() / 2;
-
-    int bboxCenterX = center.x();
-    int bboxCenterY = center.y();
-
-    qDebug() << "Frame center: (" << frameCenterX << ", " << frameCenterY << ")";
-    qDebug() << "Bounding box center: (" << bboxCenterX << ", " << bboxCenterY << ")";
-
-    int deltaX = bboxCenterX - frameCenterX;
-    int deltaY = bboxCenterY - frameCenterY;
-
-    qDebug() << "DeltaX: " << deltaX << ", DeltaY: " << deltaY;
-
-    int threshold = 10;
-
-    float Kp = 4;
-    float Ki = 0.02;
-    float Kd = 0.02;
-
-    float adjustedKp = Kp ;/// (1 + std::log(zoomLevel / 1771.0f)); // Normalized zoom level
-    float adjustedKd = Kd ;//* (1 + std::log(zoomLevel / 1771.0f));
-    float adjustedKi = Ki ; // Giữ nguyên Ki
-
-    qDebug() << "Adjusted PID values - Kp: " << adjustedKp << ", Ki: " << adjustedKi << ", Kd: " << adjustedKd;
-
-    static int prevDeltaX = 0;
-    static int prevDeltaY = 0;
-    static int integralX = 0;
-    static int integralY = 0;
-
-    integralX += deltaX;
-    if(integralX>1000)integralX=1000;
-    if(integralX<-10000)integralX=-1000;
-    integralY += deltaY;
-    if(integralY>1000)integralY=1000;
-    if(integralY<-1000)integralY=-1000;
-
-    float panSpeed = adjustedKp * deltaX + adjustedKi * integralX + adjustedKd * (deltaX - prevDeltaX);
-    float tiltSpeed = adjustedKp * deltaY + adjustedKi * integralY + adjustedKd * (deltaY - prevDeltaY);
-
-    qDebug() << "PID control values - panSpeed: " << panSpeed << ", tiltSpeed: " << tiltSpeed;
-
-    prevDeltaX = deltaX;
-    prevDeltaY = deltaY;
-
-    float distanceToCenter = std::sqrt(deltaX * deltaX + deltaY * deltaY);
-    float speedScale = 0.05;
-    if(zoomLevel==0)speedScale=0.00;
-    //khoảng cách tới trung tâm và hệ số điều chỉnh tốc độ
-    qDebug() << "Distance to center: " << distanceToCenter << ", Speed scale: " << speedScale;
-
-    panSpeed *= speedScale;
-    tiltSpeed *= speedScale;
-
-    //bounding box đã gần trung tâm (trong ngưỡng)
-    if (std::abs(deltaX) < threshold && std::abs(deltaY) < threshold) {
-        panSpeed = 0;
-        tiltSpeed = 0;
-        qDebug() << "Bounding box is within the threshold, stopping movement.";
-    }
-
-    // Áp dụng hàm sigmoid để chuẩn hóa giá trị tốc độ về khoảng [0, 63]
-    auto sigmoid = [](float x) -> float {
-        return 63.0f / (1.0f + std::exp(-x));
-    };
-
-    float absPanSpeed = (panSpeed);
-    float absTiltSpeed = sigmoid(tiltSpeed);
-
-    //tốc độ sau khi áp dụng hàm sigmoid
-    qDebug() << "Sigmoid adjusted values - absPanSpeed: " << absPanSpeed << ", absTiltSpeed: " << absTiltSpeed;
-
-    bool panRight = (deltaX > 0);  // Pan right nếu deltaX dương
-    bool tiltDown = (deltaY > 0);  // Tilt down nếu deltaY dương
-
-    qDebug() << "Pan right: " << panRight << ", Tilt down: " << tiltDown;
-
-    if(absPanSpeed>63)absPanSpeed=63;
-    char panSpeedChar = int(absPanSpeed);
-    char tiltSpeedChar = static_cast<char>(std::clamp(absTiltSpeed, 0.0f, 63.0f));
-
-    qDebug() << "Final panSpeedChar: " << int(panSpeedChar);
-    qDebug() << "Final tiltSpeedChar: " << int(tiltSpeedChar);
-
-    sendPanTiltCommand(panRight, panSpeedChar, tiltDown, tiltSpeedChar);
-}
-
-void MainWindow::sendPanTiltCommand(bool panRight, float panSpeed, bool tiltDown, float tiltSpeed)
-{
-    unsigned char command2 = 0x00;
-
-    // Điều chỉnh Pan
-    if (panRight) {
-        command2 |= 0x02;  // Pan phải
-    } else {
-        command2 |= 0x04;  // Pan trái
-    }
-
-    // Điều chỉnh Tilt
-    if (tiltDown) {
-        command2 |= 0x10;  // Tilt xuống
-    } else {
-        command2 |= 0x08;  // Tilt lên
-    }
-
-    // Chuyển đổi tốc độ Pan và Tilt thành byte (0 đến 63)
-    unsigned char panSpeedByte = static_cast<unsigned char>(panSpeed);  // Tốc độ pan
-    unsigned char tiltSpeedByte = static_cast<unsigned char>(tiltSpeed); // Tốc độ tilt
-
-    // Tính checksum cho khung lệnh Pelco D
-    unsigned char address = 0x01;
-    unsigned char command1 = 0x00;
-
-    frameControl.clear();
-    frameControl.append(static_cast<char>(0xFF));        // Byte bắt đầu
-    frameControl.append(static_cast<char>(address));     // Địa chỉ camera
-    frameControl.append(static_cast<char>(command1));    // Byte đồng bộ
-    frameControl.append(static_cast<char>(command2));    // Lệnh Pan/Tilt
-    frameControl.append(static_cast<char>(panSpeedByte)); // Tốc độ Pan
-    frameControl.append(static_cast<char>(tiltSpeedByte)); // Tốc độ Tilt
-    quint8 checksum = (0x01 + command1 + command2 + panSpeedByte + tiltSpeedByte) % 0x100;
-    frameControl.append(static_cast<char>(checksum));    // Checksum
-
-    // Gửi khung lệnh điều khiển qua cổng nối tiếp
-    sendPelcoDCommand(frameControl);
-}
-
-void MainWindow::sendPelcoDCommand(QByteArray frame)
-{
-    if (ptzSerialPort->isOpen()) {
-        ptzSerialPort->write(frame); // Gửi lệnh qua cổng serial
-        ptzSerialPort->flush();      // Xả dữ liệu ra
-    } else {
-        qDebug() << "ptzSerialPort is not open!!!";
-    }
-}
-
-//******************** new
+//******************** new control function
 void MainWindow::timerEvent(QTimerEvent *event)
 {
     if(this->Auto_tracking && Object_Detected)
@@ -368,8 +276,8 @@ void MainWindow::timerEvent(QTimerEvent *event)
             ObjectTracking(this->currentBoundingBox, false);
         }
     }
+    qDebug() << "TIMER ĐƯỢC GỌI ĐẾN!!!";
 }
-
 void MainWindow::ObjectTracking(const QRect &bbox, bool isPan)
 {
     //    qDebug()<<"******************************************************************* Time count = " << this->count;
@@ -402,7 +310,6 @@ void MainWindow::ObjectTracking(const QRect &bbox, bool isPan)
         this->deltaY = 0;
     }
 }
-
 void MainWindow::requestPosition(QSerialPort *serialPort, bool isPan) {
     QByteArray command;
     if (isPan) {
@@ -428,7 +335,6 @@ void MainWindow::requestPosition(QSerialPort *serialPort, bool isPan) {
     this->ptzSerialPort->flush();
     command.clear();
 }
-
 void MainWindow::updatePosition(QByteArray response, double &panCurrent, double &tiltCurrent) {
     if (response.mid(3, 1).toHex() == "59")  // Mã lệnh trả về Pan Position
     {
@@ -464,13 +370,26 @@ void MainWindow::updatePosition(QByteArray response, double &panCurrent, double 
         qDebug() << "Unknown response: " << response.toHex();
     }
 }
-
 void MainWindow::onSerialDataReceived()
 {
-    QByteArray response = ptzSerialPort->readAll();
-    updatePosition(response, this->currentPanAngle, this->currentTiltAngle);
-}
+    if (ptzSerialPort->bytesAvailable() >= 7)
+    {
+        QByteArray response = ptzSerialPort->read(7);
+        //    QByteArray response = ptzSerialPort->readAll();
+        qDebug() << "Response size is: " << response.size();
 
+        if (response.size() < 7) {
+            qDebug() << "Response too short, ignoring: " << response.toHex();
+            return;
+        }
+
+        if (response.size() == 7)
+            updatePosition(response, this->currentPanAngle, this->currentTiltAngle);
+         else
+            qDebug() << "Received an empty response at -onSerialDataReceived-!";
+
+    }
+}
 void MainWindow::Absolute_Pan_Position(double pan_angle)
 {
     // Đọc giá trị Pan Angle từ giao diện người dùng (giả sử góc nhập bằng độ)
@@ -526,14 +445,12 @@ void MainWindow::Absolute_Tilt_Position(double tilt_angle)
     // Gửi lệnh tới camera qua giao tiếp serial
     this->ptzSerialPort->write(frame);
 }
-
-//************
+//===============================>
 void MainWindow::resizeEvent(QResizeEvent *event)
 {
     QMainWindow::resizeEvent(event);
     imageLabel->update();
 }
-
 void MainWindow::paintEvent(QPaintEvent *event) {
     if (currentImage.isNull())
         return;
@@ -628,7 +545,6 @@ void MainWindow::paintEvent(QPaintEvent *event) {
     painter.setPen(QColor(Qt::white));
     painter.drawText(x, y, currentTime);
 }
-
 void MainWindow::updateBlinking()
 {
     // Đảo trạng thái nhấp nháy
@@ -637,7 +553,6 @@ void MainWindow::updateBlinking()
     // Cập nhật lại giao diện
     update();
 }
-
 void MainWindow::drawPanGauge(QPainter &painter, int panAngle) {
     int gaugeWidth = this->width() - 120;  // Chiều dài thước đo
     int gaugeHeight = 40;  // Chiều cao thước đo
@@ -696,8 +611,6 @@ void MainWindow::drawPanGauge(QPainter &painter, int panAngle) {
     painter.setFont(QFont("Arial", 12, QFont::Bold));
     painter.drawText(gaugeX + panPosition - 15, gaugeY - 20, QString::number(panAngle) + "°");
 }
-
-
 void MainWindow::drawTiltGauge(QPainter &painter, double tiltAngle) {
     int gaugeWidth = 40;  // Chiều rộng thước đo
     int gaugeHeight = this->height() - 120;  // Chiều cao thước đo
@@ -729,7 +642,7 @@ void MainWindow::drawTiltGauge(QPainter &painter, double tiltAngle) {
 
         // Vẽ vạch nổi (nét đen lớn trước, sau đó nét trắng nhỏ hơn)
         painter.setPen(QPen(Qt::black, 3));  // Nét đen lớn
-//        painter.drawLine(gaugeX + gaugeWidth - lineLength, pos, gaugeX + gaugeWidth, pos);
+        //        painter.drawLine(gaugeX + gaugeWidth - lineLength, pos, gaugeX + gaugeWidth, pos);
         painter.drawLine(gaugeX , pos, gaugeX + lineLength, pos);
 
         painter.setPen(QPen(Qt::white, 1));  // Nét trắng nhỏ hơn
@@ -767,7 +680,6 @@ void MainWindow::drawTiltGauge(QPainter &painter, double tiltAngle) {
     painter.setPen(QPen(Qt::white, 4));  // Nét trắng nhỏ cho chữ
     painter.drawText(gaugeX - 50, tiltPos + 5, tiltText);  // Vẽ chữ trắng nổi
 }
-
 void MainWindow::Paint_Pan_Status(QPainter &painter, double Pan_Angle) {
     // Thiết lập kích thước và vị trí của đồng hồ ở góc dưới bên trái
     int width = 250;  // Đường kính đồng hồ
@@ -844,15 +756,6 @@ void MainWindow::Paint_Pan_Status(QPainter &painter, double Pan_Angle) {
     painter.setPen(QPen(Qt::white, 2));  // Nét trắng mảnh hơn
     painter.drawText(pan_text_x - 10, pan_text_y + 10, pan_text);
 }
-
-#include <QPainter>
-#include <QWidget>
-// Giả định rằng bạn có một lớp MainWindow kế thừa từ QWidget
-#include <QPainter>
-#include <QWidget>
-#include <QPainter>
-#include <QWidget>
-
 void MainWindow::drawObjectInCenter(QPainter &painter) {
 
 
@@ -873,19 +776,43 @@ void MainWindow::drawObjectInCenter(QPainter &painter) {
     // Vẽ bốn góc vuông của hình chữ nhật
     QPen whitePen(Qt::white);
     whitePen.setWidth(2);
-    painter.setPen(whitePen);
+
+    QPen blackPen1(Qt::black);
+    blackPen1.setWidth(4);
 
     // Kích thước của các góc vuông
-    int cornerSize = 25; // Kích thước của các góc vuông
+    int cornerSize = 45; // Kích thước của các góc vuông
+    painter.setPen(blackPen1);
     painter.drawLine(topLeft, QPoint(topLeft.x() + cornerSize, topLeft.y()));
     painter.drawLine(topLeft, QPoint(topLeft.x(), topLeft.y() + cornerSize));
 
+    painter.setPen(whitePen);
+    painter.drawLine(topLeft, QPoint(topLeft.x() + cornerSize, topLeft.y()));
+    painter.drawLine(topLeft, QPoint(topLeft.x(), topLeft.y() + cornerSize));
+    //-------
+    painter.setPen(blackPen1);
     painter.drawLine(topRight, QPoint(topRight.x() - cornerSize, topRight.y()));
     painter.drawLine(topRight, QPoint(topRight.x(), topRight.y() + cornerSize));
 
+    painter.setPen(whitePen);
+    painter.drawLine(topRight, QPoint(topRight.x() - cornerSize, topRight.y()));
+    painter.drawLine(topRight, QPoint(topRight.x(), topRight.y() + cornerSize));
+
+    //-------
+    painter.setPen(blackPen1);
     painter.drawLine(bottomLeft, QPoint(bottomLeft.x() + cornerSize, bottomLeft.y()));
     painter.drawLine(bottomLeft, QPoint(bottomLeft.x(), bottomLeft.y() - cornerSize));
 
+    painter.setPen(whitePen);
+    painter.drawLine(bottomLeft, QPoint(bottomLeft.x() + cornerSize, bottomLeft.y()));
+    painter.drawLine(bottomLeft, QPoint(bottomLeft.x(), bottomLeft.y() - cornerSize));
+
+    //-------
+    painter.setPen(blackPen1);
+    painter.drawLine(bottomRight, QPoint(bottomRight.x() - cornerSize, bottomRight.y()));
+    painter.drawLine(bottomRight, QPoint(bottomRight.x(), bottomRight.y() - cornerSize));
+
+    painter.setPen(whitePen);
     painter.drawLine(bottomRight, QPoint(bottomRight.x() - cornerSize, bottomRight.y()));
     painter.drawLine(bottomRight, QPoint(bottomRight.x(), bottomRight.y() - cornerSize));
 
@@ -918,33 +845,10 @@ void MainWindow::drawObjectInCenter(QPainter &painter) {
     // Vẽ viền cho đoạn thẳng dọc
     painter.drawLine(centerX, centerY, centerX, centerY + verticalLineLength);
 }
-
-QByteArray MainWindow::createPelcoCommand(quint8 command) {
-    QByteArray packet;
-    packet.append(static_cast<char>(0xFF));  // Sync byte
-    packet.append(static_cast<char>(0x01));  // Address byte (camera ID)
-    packet.append(static_cast<char>(0x00));  // Command 1 byte
-    packet.append(static_cast<char>(command)); // Command 2 byte (specific command like 0x51 for pan)
-    packet.append(static_cast<char>(0x00));  // Data 1 byte
-    packet.append(static_cast<char>(0x01));  // Data 2 byte
-    packet.append(static_cast<char>(calculateChecksum(packet))); // Checksum byte
-    return packet;
-}
-
-quint8 MainWindow::calculateChecksum(const QByteArray &packet) {
-    quint8 checksum = 0;
-    for (int i = 1; i < packet.size(); ++i) {
-        checksum += packet[i];
-    }
-    return checksum % 0x100;
-}
-
 void MainWindow::on_actionControl_Manual_triggered()
 {
-
     m_Manual_Control->show();
 }
-
 //control manual
 void MainWindow::UpSlot()
 {
@@ -962,7 +866,6 @@ void MainWindow::UpSlot()
 
     this->ptzSerialPort->write(frame);
 }
-
 void MainWindow::DownSlot()
 {
     QByteArray frame;
@@ -979,7 +882,6 @@ void MainWindow::DownSlot()
 
     this->ptzSerialPort->write(frame);
 }
-
 void MainWindow::LeftSlot()
 {
     QByteArray frame;
@@ -996,7 +898,6 @@ void MainWindow::LeftSlot()
 
     this->ptzSerialPort->write(frame);
 }
-
 void MainWindow::RightSlot()
 {
     QByteArray frame;
@@ -1013,7 +914,6 @@ void MainWindow::RightSlot()
 
     this->ptzSerialPort->write(frame);
 }
-
 void MainWindow::FocusInSlot()
 {
     QByteArray frame;
@@ -1030,7 +930,6 @@ void MainWindow::FocusInSlot()
 
     this->ptzSerialPort->write(frame);
 }
-
 void MainWindow::FocusOutSlot()
 {
     QByteArray frame;
@@ -1047,7 +946,6 @@ void MainWindow::FocusOutSlot()
 
     this->ptzSerialPort->write(frame);
 }
-
 void MainWindow::ZoomInSlot()
 {
     QByteArray frame;
@@ -1064,7 +962,6 @@ void MainWindow::ZoomInSlot()
 
     this->ptzSerialPort->write(frame);
 }
-
 void MainWindow::ZoomOutSlot()
 {
     QByteArray frame;
@@ -1081,7 +978,6 @@ void MainWindow::ZoomOutSlot()
 
     this->ptzSerialPort->write(frame);
 }
-
 void MainWindow::StopSlot()
 {
     QByteArray frame;
@@ -1098,33 +994,27 @@ void MainWindow::StopSlot()
 
     this->ptzSerialPort->write(frame);
 }
-
 void MainWindow::on_actionFull_Screen_triggered()
 {
     this->showFullScreen();
 }
-
 void MainWindow::on_actionMinimize_Screen_triggered()
 {
     this->showNormal();
 }
-
 void MainWindow::on_actionExit_triggered()
 {
     QApplication::exit();
 }
-
 void MainWindow::on_actionStart_Auto_tracking_triggered()
 {
     this->Auto_tracking = true;
 }
-
 void MainWindow::on_actionStop_Auto_tracking_triggered()
 {
     this->Auto_tracking = false;
     StopSlot();
 }
-
 void MainWindow::keyPressEvent(QKeyEvent *event)
 {
     switch (event->key()) {
@@ -1161,7 +1051,6 @@ void MainWindow::keyPressEvent(QKeyEvent *event)
         QMainWindow::keyPressEvent(event);
     }
 }
-
 void MainWindow::keyReleaseEvent(QKeyEvent *event)
 {
     switch (event->key()) {
